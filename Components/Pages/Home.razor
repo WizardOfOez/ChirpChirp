@@ -1,0 +1,214 @@
+﻿@page "/"
+@using Chirp.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IDbContextFactory<ApplicationDbContext> Factory
+
+@attribute [Authorize]
+
+<PageTitle>Home</PageTitle>
+
+<EditForm Model="_modelTweet" OnValidSubmit="HandleValidSubmitAsync">
+    <DataAnnotationsValidator />
+    <div class="mb-3">
+        <InputTextArea id="text" class="form-control" rows="3" @bind-Value="_modelTweet.Text" placeholder="Was gibt's Neues?" />
+        <ValidationMessage For="@(() => _modelTweet.Text)" />
+    </div>
+    @if (_modelTweet.Image != null)
+    {
+        <div class="mt-3">
+            <img src="@ImagePreview" alt="Vorschau" class="img-thumbnail" style="max-width:500px;" />
+        </div>
+    }
+    <div class="d-flex justify-content-between align-items-start mb-2">
+        <label class="btn btn-sm btn-outline-primary">
+            Medien
+            <InputFile OnChange="OnInputFileChangeAsync" accept="image/*" style="display:none" />
+        </label>
+        <button type="submit" class="btn btn-primary">Posten</button>
+    </div>
+</EditForm>
+<hr/>
+
+@if (_modelLastTweets != null && _modelLastTweets.Count > 0)
+{
+    foreach (var tweet in _modelLastTweets)
+    {
+        ApplicationDbContext dbContext = Factory.CreateDbContext();
+
+        <ul class="list-unstyled">
+            <li class="mb-3">
+                <div class="border rounded p-3">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div class="fw-bold">
+                            @if (tweet.ApplicationUserId != null)
+                            {
+                                <a href="/UserInfo/@tweet.ApplicationUserId" >@(tweet.ApplicationUser?.UserName)</a>
+                            }
+                            else
+                            {
+                                <span>Unbekannt</span>
+                            }
+                            (@tweet.CreatedAt.ToLocalTime())
+                        </div>
+                        @if (tweet.ApplicationUserId != _userId)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OnFollowUserAsync(tweet)">
+                                @if (dbContext.Followers.Any(f => f.FollowerUserId == _userId && f.FollowsUserId == tweet.ApplicationUserId))
+                                {
+                                    <span>Nicht folgen</span>
+                                }
+                                else
+                                {
+                                    <span>Folgen</span>
+                                }
+                            </button>
+                        }
+                    </div>
+                    <div class="mb-2" style="white-space: pre-wrap;">
+                        <p class="mb-0">
+                            @((tweet.Text) ?? string.Empty)
+                        </p>
+                    </div>
+                    @if (tweet.Image != null)
+                    {
+                        <div class="mt-3">
+                            <img src="/images/@tweet.Id" alt="Bild" class="img-fluid" />
+                        </div>
+                    }
+                    <div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OnLikeTweetAsync(tweet)">Like</button>
+                        @((tweet.Likes?.Count) ?? 0)
+                    </div>
+                </div>
+            </li>
+        </ul>
+    }
+}
+
+@code {
+    private Tweet _modelTweet = new();
+    private string? _userId;
+    
+    #region Tweets
+    private List<Tweet>? _modelLastTweets;
+    #endregion
+    #region Image
+    private readonly long _maxFileSize = 10 * 1024 * 1024;
+    private string? ImagePreview => _modelTweet.Image != null && _modelTweet.ContentType != null
+        ? $"data:{_modelTweet.ContentType};base64,{Convert.ToBase64String(_modelTweet.Image)}"
+        : null;
+    #endregion
+    protected override async Task OnInitializedAsync()
+    {
+        await GetCurrentUserIdAsync();
+        await LoadTweetsAsync();
+        await base.OnInitializedAsync();
+    }
+    private async Task LoadTweetsAsync()
+    {
+        ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+        _modelLastTweets = await dbContext.Tweets
+            .OrderByDescending(t => t.CreatedAt)
+            .Include(u => u.ApplicationUser)
+            .Include(l => l.Likes)
+            .Take(10)
+            .ToListAsync();
+        StateHasChanged();
+    }
+    private async Task GetCurrentUserIdAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        }
+    }
+    private async Task HandleValidSubmitAsync()
+    {
+        ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+        if (_userId != null)
+        {
+            _modelTweet.ApplicationUserId = _userId;
+            dbContext.Tweets.Add(_modelTweet);
+            await dbContext.SaveChangesAsync();
+            await LoadTweetsAsync();
+            _modelTweet = new Tweet();
+        }
+    }
+    private async Task OnLikeTweetAsync(Tweet tweet)
+    {
+        ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+        var newLike = new Like
+        {
+            TweetId = tweet.Id,
+            ApplicationUserId = _userId
+        };
+        var existingLike = await dbContext.Likes
+            .FirstOrDefaultAsync(l => l.TweetId == tweet.Id && l.ApplicationUserId == _userId);
+        if (existingLike != null)
+        {
+            dbContext.Likes.Remove(existingLike);
+        }
+        else
+        {
+            dbContext.Likes.Add(newLike);
+        }
+        await dbContext.SaveChangesAsync();
+        await LoadTweetsAsync();
+    }
+    private async Task OnFollowUserAsync(Tweet tweet)
+    {
+        ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+        var existingFollower = await dbContext.Followers.FirstOrDefaultAsync(f => f.FollowsUserId == tweet.ApplicationUserId);
+        if (existingFollower != null)
+        {
+            dbContext.Followers.Remove(existingFollower);
+        }
+        else
+        {
+            var newFollower = new Followers
+            {
+                FollowerUserId = _userId,
+                FollowsUserId = tweet.ApplicationUserId
+            };
+            dbContext.Followers.Add(newFollower);
+        }
+        await dbContext.SaveChangesAsync();
+        await LoadTweetsAsync();
+    }
+
+    private async Task OnInputFileChangeAsync(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+
+        if (!file.ContentType.StartsWith("image/"))
+        {
+            return;
+        }
+        if (file.Size > _maxFileSize)
+        {
+            return;
+        }
+        try
+        {
+            var resized = await file.RequestImageFileAsync(file.ContentType, 800, 600);
+
+            using var ms = new MemoryStream();
+            await resized.OpenReadStream(_maxFileSize).CopyToAsync(ms);
+            _modelTweet.Image = ms.ToArray();
+
+            _modelTweet.ContentType = resized.ContentType ?? file.ContentType;
+
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex);
+            _modelTweet.Image = null;
+        }
+    }
+
+}

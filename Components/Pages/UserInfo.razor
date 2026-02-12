@@ -1,0 +1,253 @@
+﻿@page "/userinfo/{id}"
+@using Chirp.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using Chirp.Tools
+
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IDbContextFactory<ApplicationDbContext> Factory
+
+@attribute [Authorize]
+
+<PageTitle>User</PageTitle>
+
+@if (User == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    @if (User.BackgroundPicture != null)
+    {
+        <div class="user-header">
+            <img src="@BackgroundImageSource" alt="Headerbild" class="header-img" />
+            <div class="avatar-wrap">
+                <img src="@ProfileImageSource" alt="Avatar" class="avatar-img" />
+            </div>
+        </div>
+    }
+    <div class="fw-bold mt-6">@User.UserName</div>
+    @if (_isCurrentUser)
+    {
+        <div class="mb-2">
+            <label class="btn btn-sm btn-outline-primary">
+                Hintergrund
+                <InputFile OnChange="OnBackgroundFileChangeAsync" accept="image/*" style="display:none" />
+            </label>
+            <label class="btn btn-sm btn-outline-primary">
+                Profil
+                <InputFile OnChange="OnProfileFileChangeAsync" accept="image/*" style="display:none" />
+            </label>
+        </div>
+    }
+;
+}
+<h3 class="mt-3">Posts</h3>
+<hr />
+@if (_modelLastTweets != null && _modelLastTweets.Count > 0)
+{
+    foreach (var tweet in _modelLastTweets)
+    {
+        ApplicationDbContext dbContext = Factory.CreateDbContext();
+
+        <ul class="list-unstyled">
+            <li class="mb-3">
+                <div class="border rounded p-3">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div class="fw-bold">
+                            @if (tweet.ApplicationUserId != null)
+                            {
+                                <a href="/UserInfo/@tweet.ApplicationUserId">@(tweet.ApplicationUser?.UserName)</a>
+                            }
+                            else
+                            {
+                                <span>Unbekannt</span>
+                            }
+                            (@tweet.CreatedAt.ToLocalTime())
+                        </div>
+                        @if (tweet.ApplicationUserId != Id)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OnFollowUserAsync(tweet)">
+                                @if (dbContext.Followers.Any(f => f.FollowerUserId == Id && f.FollowsUserId == tweet.ApplicationUserId))
+                                {
+                                    <span>Nicht folgen</span>
+                                }
+                                else
+                                {
+                                    <span>Folgen</span>
+                                }
+                            </button>
+                        }
+                    </div>
+                    <div class="mb-2" style="white-space: pre-wrap;">
+                        <p class="mb-0">
+                            @((tweet.Text) ?? string.Empty)
+                        </p>
+                    </div>
+                    @if (tweet.Image != null)
+                    {
+                        <div class="mt-3">
+                            <img src="/images/@tweet.Id" alt="Bild" class="img-fluid" />
+                        </div>
+                    }
+                    <div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OnLikeTweetAsync(tweet)">Like</button>
+                        @((tweet.Likes?.Count) ?? 0)
+                    </div>
+                </div>
+            </li>
+        </ul>
+    }
+}
+
+@code {
+    [Parameter]
+    public string? Id { get; set; }
+    public ApplicationUser? User { get; set; }
+    private List<Tweet>? _modelLastTweets;
+    private bool _isCurrentUser = false;
+    private readonly long _maxFileSize = 10 * 1024 * 1024;
+    private string _backgroundImageVersion = DateTime.UtcNow.Ticks.ToString();
+    private string _profileImageVersion = DateTime.UtcNow.Ticks.ToString();
+
+    protected override async Task OnInitializedAsync()
+    {
+        ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+        User = await dbContext.Users.FirstOrDefaultAsync(u => u.Id == Id);
+        if (User == null)
+        {
+            return;
+        }
+        _isCurrentUser = await CheckIfCurrentUserAsync(User.Id);
+        await LoadTweetsAsync();
+        await base.OnInitializedAsync();
+    }
+    private string BackgroundImageSource => $"/images/background/{User?.Id}?v={_backgroundImageVersion}";
+    private string ProfileImageSource => $"/images/profile/{User?.Id}?v={_profileImageVersion}";
+
+    private async Task<bool> CheckIfCurrentUserAsync(string userId)
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            return userId == user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        }
+        return false;
+    }
+    private async Task LoadTweetsAsync()
+    {
+        ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+        _modelLastTweets = await dbContext.Tweets
+            .Include(u => u.ApplicationUser)
+            .Include(l => l.Likes)
+            .Where(t => t.ApplicationUserId == Id)
+            .OrderByDescending(t => t.CreatedAt)
+            .Take(10)
+            .ToListAsync();
+        StateHasChanged();
+    }
+    private async Task OnLikeTweetAsync(Tweet tweet)
+    {
+        ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+        var newLike = new Like
+        {
+            TweetId = tweet.Id,
+            ApplicationUserId = Id
+        };
+        var existingLike = await dbContext.Likes
+            .FirstOrDefaultAsync(l => l.TweetId == tweet.Id && l.ApplicationUserId == Id);
+        if (existingLike != null)
+        {
+            dbContext.Likes.Remove(existingLike);
+        }
+        else
+        {
+            dbContext.Likes.Add(newLike);
+        }
+        await dbContext.SaveChangesAsync();
+        await LoadTweetsAsync();
+    }
+    private async Task OnFollowUserAsync(Tweet tweet)
+    {
+        ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+        var existingFollower = await dbContext.Followers.FirstOrDefaultAsync(f => f.FollowsUserId == tweet.ApplicationUserId);
+        if (existingFollower != null)
+        {
+            dbContext.Followers.Remove(existingFollower);
+        }
+        else
+        {
+            var newFollower = new Followers
+            {
+                FollowerUserId = Id,
+                FollowsUserId = tweet.ApplicationUserId
+            };
+            dbContext.Followers.Add(newFollower);
+        }
+        await dbContext.SaveChangesAsync();
+        await LoadTweetsAsync();
+    }
+    private async Task OnBackgroundFileChangeAsync(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+
+        if (User == null) return; // Kein Benutzer geladen
+
+        if (!file.ContentType.StartsWith("image/")) return; 
+
+        if (file.Size > _maxFileSize) return; 
+        try
+        {
+            var resized = await file.RequestImageFileAsync(file.ContentType, 1024, 768);
+
+            using var ms = new MemoryStream();
+            await resized.OpenReadStream(_maxFileSize).CopyToAsync(ms);
+            User.BackgroundPicture = ImageProcessing.CropTop(ms.ToArray(), resized.ContentType);
+
+            User.BackgroundPictureContentType = resized.ContentType;
+            ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+            dbContext.Attach(User);
+            dbContext.Entry(User).State = EntityState.Modified;
+            await dbContext.SaveChangesAsync();
+            _backgroundImageVersion = DateTime.UtcNow.Ticks.ToString();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex);
+            User.BackgroundPicture = null;
+        }
+    }
+    private async Task OnProfileFileChangeAsync(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+
+        if (User == null) return; // Kein Benutzer geladen
+
+        if (!file.ContentType.StartsWith("image/")) return; 
+
+        if (file.Size > _maxFileSize) return; 
+        try
+        {
+            var resized = await file.RequestImageFileAsync(file.ContentType, 135, 768);
+
+            using var ms = new MemoryStream();
+            await resized.OpenReadStream(_maxFileSize).CopyToAsync(ms);
+            User.ProfilePicture = ImageProcessing.CropTop(ms.ToArray(), resized.ContentType, 135);
+
+            User.ProfilePictureContentType = resized.ContentType;
+            ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+            dbContext.Attach(User);
+            dbContext.Entry(User).State = EntityState.Modified;
+            await dbContext.SaveChangesAsync();
+            _profileImageVersion = DateTime.UtcNow.Ticks.ToString();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex);
+            User.ProfilePicture = null;
+        }
+    }
+}
