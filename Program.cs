@@ -4,9 +4,6 @@ using Chirp.Data;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Chirp.Components;
-using Chirp.Components.Account;
-using Chirp.Data;
 
 
 var builder = WebApplication.CreateBuilder(args);

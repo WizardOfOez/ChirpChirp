@@ -6,6 +6,7 @@
 @using Chirp.Data
 
 @inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
 @inject ILogger<Login> Logger
 @inject NavigationManager NavigationManager
 @inject IdentityRedirectManager RedirectManager
@@ -23,9 +24,9 @@
                 <hr />
                 <ValidationSummary class="text-danger" role="alert" />
                 <div class="form-floating mb-3">
-                    <InputText @bind-Value="Input.Email" class="form-control" autocomplete="username" aria-required="true" placeholder="name@example.com" />
-                    <label for="email" class="form-label">Email</label>
-                    <ValidationMessage For="() => Input.Email" class="text-danger" />
+                    <InputText @bind-Value="Input.EmailOrUsername" class="form-control" autocomplete="username" aria-required="true" placeholder="Email or Username" />
+                    <label for="email-or-username" class="form-label">Email or Username</label>
+                    <ValidationMessage For="() => Input.EmailOrUsername" class="text-danger" />
                 </div>
                 <div class="form-floating mb-3">
                     <InputText type="password" @bind-Value="Input.Password" class="form-control" autocomplete="current-password" aria-required="true" placeholder="password" />
@@ -87,9 +88,17 @@
 
     public async Task LoginUser()
     {
-        // This doesn't count login failures towards account lockout
-        // To enable password failures to trigger account lockout, set lockoutOnFailure: true
-        var result = await SignInManager.PasswordSignInAsync(Input.Email, Input.Password, Input.RememberMe, lockoutOnFailure: false);
+        // Try to find user by email or username
+        var user = await UserManager.FindByEmailAsync(Input.EmailOrUsername) 
+                ?? await UserManager.FindByNameAsync(Input.EmailOrUsername);
+
+        if (user is null)
+        {
+            errorMessage = "Error: Invalid login attempt.";
+            return;
+        }
+
+        var result = await SignInManager.PasswordSignInAsync(user, Input.Password, Input.RememberMe, lockoutOnFailure: false);
         if (result.Succeeded)
         {
             Logger.LogInformation("User logged in.");
@@ -115,8 +124,8 @@
     private sealed class InputModel
     {
         [Required]
-        [EmailAddress]
-        public string Email { get; set; } = "";
+        [Display(Name = "Email or Username")]
+        public string EmailOrUsername { get; set; } = "";
 
         [Required]
         [DataType(DataType.Password)]

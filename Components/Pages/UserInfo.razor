@@ -26,21 +26,43 @@ else
             </div>
         </div>
     }
-    <div class="fw-bold mt-6">@User.UserName</div>
-    @if (_isCurrentUser)
-    {
-        <div class="mb-2">
-            <label class="btn btn-sm btn-outline-primary">
-                Hintergrund
-                <InputFile OnChange="OnBackgroundFileChangeAsync" accept="image/*" style="display:none" />
-            </label>
-            <label class="btn btn-sm btn-outline-primary">
-                Profil
-                <InputFile OnChange="OnProfileFileChangeAsync" accept="image/*" style="display:none" />
-            </label>
+
+    <div class="profile-content">
+        <div class="fw-bold mt-6">@User.UserName</div>
+        @if (!string.IsNullOrEmpty(User.Bio))
+        {
+            <p>@User.Bio</p>
+        }
+        <div class="text-muted small mb-3">
+            <span>Chirps: @_totalChirps</span> | 
+            <span>Received Likes: @_receivedLikes</span> | 
+            <span>Given Likes: @_givenLikes</span>
         </div>
-    }
-;
+        @if (_isCurrentUser)
+        {
+            <div class="mb-2">
+                <label class="btn btn-sm btn-outline-primary">
+                    Hintergrund
+                    <InputFile OnChange="OnBackgroundFileChangeAsync" accept="image/*" style="display:none" />
+                </label>
+                <label class="btn btn-sm btn-outline-primary">
+                    Profil
+                    <InputFile OnChange="OnProfileFileChangeAsync" accept="image/*" style="display:none" />
+                </label>
+                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="OnEditBioClick">
+                    Bio bearbeiten
+                </button>
+            </div>
+            @if (_isEditingBio)
+            {
+                <div class="mb-3">
+                    <InputTextArea class="form-control" rows="2" @bind-Value="_bioEdit" placeholder="Schreibe deine Bio..."></InputTextArea>
+                    <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="OnBioSaveClick">Speichern</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary mt-2" @onclick="OnBioCancelClick">Abbrechen</button>
+                </div>
+            }
+        }
+    </div>
 }
 <h3 class="mt-3">Posts</h3>
 <hr />
@@ -49,6 +71,7 @@ else
     foreach (var tweet in _modelLastTweets)
     {
         ApplicationDbContext dbContext = Factory.CreateDbContext();
+        var isOwnTweet = tweet.ApplicationUserId == _currentUserId;
 
         <ul class="list-unstyled">
             <li class="mb-3">
@@ -63,21 +86,29 @@ else
                             {
                                 <span>Unbekannt</span>
                             }
-                            (@tweet.CreatedAt.ToLocalTime())
+                            <span class="text-muted fw-normal">(@tweet.CreatedAt.ToLocalTime().ToString("g"))</span>
                         </div>
-                        @if (tweet.ApplicationUserId != Id)
-                        {
-                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OnFollowUserAsync(tweet)">
-                                @if (dbContext.Followers.Any(f => f.FollowerUserId == Id && f.FollowsUserId == tweet.ApplicationUserId))
-                                {
-                                    <span>Nicht folgen</span>
-                                }
-                                else
-                                {
-                                    <span>Folgen</span>
-                                }
-                            </button>
-                        }
+                        <div class="d-flex gap-2">
+                            @if (!isOwnTweet && tweet.ApplicationUserId != null)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OnFollowUserAsync(tweet)">
+                                    @if (dbContext.Followers.Any(f => f.FollowerUserId == _currentUserId && f.FollowsUserId == tweet.ApplicationUserId))
+                                    {
+                                        <span>Nicht folgen</span>
+                                    }
+                                    else
+                                    {
+                                        <span>Folgen</span>
+                                    }
+                                </button>
+                            }
+                            @if (isOwnTweet)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => OnDeleteTweetAsync(tweet)" title="Chirp löschen">
+                                    <span class="bi bi-trash"></span>
+                                </button>
+                            }
+                        </div>
                     </div>
                     <div class="mb-2" style="white-space: pre-wrap;">
                         <p class="mb-0">
@@ -90,9 +121,11 @@ else
                             <img src="/images/@tweet.Id" alt="Bild" class="img-fluid" />
                         </div>
                     }
-                    <div>
-                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OnLikeTweetAsync(tweet)">Like</button>
-                        @((tweet.Likes?.Count) ?? 0)
+                    <div class="mt-2">
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OnLikeTweetAsync(tweet)">
+                            <span class="bi bi-heart"></span> Like
+                        </button>
+                        <span class="ms-2 text-muted">@((tweet.Likes?.Count) ?? 0)</span>
                     </div>
                 </div>
             </li>
@@ -106,6 +139,12 @@ else
     public ApplicationUser? User { get; set; }
     private List<Tweet>? _modelLastTweets;
     private bool _isCurrentUser = false;
+    private bool _isEditingBio = false;
+    private string? _bioEdit;
+    private string? _currentUserId;
+    private int _totalChirps = 0;
+    private int _receivedLikes = 0;
+    private int _givenLikes = 0;
     private readonly long _maxFileSize = 10 * 1024 * 1024;
     private string _backgroundImageVersion = DateTime.UtcNow.Ticks.ToString();
     private string _profileImageVersion = DateTime.UtcNow.Ticks.ToString();
@@ -119,7 +158,9 @@ else
             return;
         }
         _isCurrentUser = await CheckIfCurrentUserAsync(User.Id);
+        await GetCurrentUserIdAsync();
         await LoadTweetsAsync();
+        await LoadStatisticsAsync();
         await base.OnInitializedAsync();
     }
     private string BackgroundImageSource => $"/images/background/{User?.Id}?v={_backgroundImageVersion}";
@@ -135,6 +176,17 @@ else
         }
         return false;
     }
+
+    private async Task GetCurrentUserIdAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            _currentUserId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        }
+    }
+
     private async Task LoadTweetsAsync()
     {
         ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
@@ -143,8 +195,27 @@ else
             .Include(l => l.Likes)
             .Where(t => t.ApplicationUserId == Id)
             .OrderByDescending(t => t.CreatedAt)
-            .Take(10)
+            .Take(5)
             .ToListAsync();
+        StateHasChanged();
+    }
+    private async Task LoadStatisticsAsync()
+    {
+        ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+        
+        _totalChirps = await dbContext.Tweets
+            .Where(t => t.ApplicationUserId == Id)
+            .CountAsync();
+
+        _receivedLikes = await dbContext.Likes
+            .Include(l => l.Tweet)
+            .Where(l => l.Tweet!.ApplicationUserId == Id)
+            .CountAsync();
+
+        _givenLikes = await dbContext.Likes
+            .Where(l => l.ApplicationUserId == Id)
+            .CountAsync();
+
         StateHasChanged();
     }
     private async Task OnLikeTweetAsync(Tweet tweet)
@@ -153,10 +224,10 @@ else
         var newLike = new Like
         {
             TweetId = tweet.Id,
-            ApplicationUserId = Id
+            ApplicationUserId = _currentUserId
         };
         var existingLike = await dbContext.Likes
-            .FirstOrDefaultAsync(l => l.TweetId == tweet.Id && l.ApplicationUserId == Id);
+            .FirstOrDefaultAsync(l => l.TweetId == tweet.Id && l.ApplicationUserId == _currentUserId);
         if (existingLike != null)
         {
             dbContext.Likes.Remove(existingLike);
@@ -167,11 +238,12 @@ else
         }
         await dbContext.SaveChangesAsync();
         await LoadTweetsAsync();
+        await LoadStatisticsAsync();
     }
     private async Task OnFollowUserAsync(Tweet tweet)
     {
         ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
-        var existingFollower = await dbContext.Followers.FirstOrDefaultAsync(f => f.FollowsUserId == tweet.ApplicationUserId);
+        var existingFollower = await dbContext.Followers.FirstOrDefaultAsync(f => f.FollowerUserId == _currentUserId && f.FollowsUserId == tweet.ApplicationUserId);
         if (existingFollower != null)
         {
             dbContext.Followers.Remove(existingFollower);
@@ -180,7 +252,7 @@ else
         {
             var newFollower = new Followers
             {
-                FollowerUserId = Id,
+                FollowerUserId = _currentUserId,
                 FollowsUserId = tweet.ApplicationUserId
             };
             dbContext.Followers.Add(newFollower);
@@ -188,11 +260,41 @@ else
         await dbContext.SaveChangesAsync();
         await LoadTweetsAsync();
     }
+
+    private async Task OnDeleteTweetAsync(Tweet tweet)
+    {
+        if (tweet.ApplicationUserId != _currentUserId)
+        {
+            return; // Only allow users to delete their own tweets
+        }
+
+        ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+        var tweetToDelete = await dbContext.Tweets.FindAsync(tweet.Id);
+        
+        if (tweetToDelete != null)
+        {
+            // Delete associated peeps
+            var peepsToDelete = await dbContext.Peeps.Where(p => p.TweetId == tweet.Id).ToListAsync();
+            dbContext.Peeps.RemoveRange(peepsToDelete);
+
+            // Delete associated likes
+            var likesToDelete = await dbContext.Likes.Where(l => l.TweetId == tweet.Id).ToListAsync();
+            dbContext.Likes.RemoveRange(likesToDelete);
+
+            // Delete the tweet
+            dbContext.Tweets.Remove(tweetToDelete);
+            await dbContext.SaveChangesAsync();
+
+            await LoadTweetsAsync();
+            await LoadStatisticsAsync();
+        }
+    }
+
     private async Task OnBackgroundFileChangeAsync(InputFileChangeEventArgs e)
     {
         var file = e.File;
 
-        if (User == null) return; // Kein Benutzer geladen
+        if (User == null) return; 
 
         if (!file.ContentType.StartsWith("image/")) return; 
 
@@ -223,7 +325,7 @@ else
     {
         var file = e.File;
 
-        if (User == null) return; // Kein Benutzer geladen
+        if (User == null) return; 
 
         if (!file.ContentType.StartsWith("image/")) return; 
 
@@ -249,5 +351,27 @@ else
             Console.WriteLine(ex);
             User.ProfilePicture = null;
         }
+    }
+    private void OnEditBioClick()
+    {
+        _bioEdit = User?.Bio;
+        _isEditingBio = true;
+    }
+    private async Task OnBioSaveClick()
+    {
+        if (User != null)
+        {
+            User.Bio = _bioEdit;
+            ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+            dbContext.Attach(User);
+            dbContext.Entry(User).State = EntityState.Modified;
+            await dbContext.SaveChangesAsync();
+            _isEditingBio = false;
+            StateHasChanged();
+        }
+    }
+    private void OnBioCancelClick()
+    {
+        _isEditingBio = false;
     }
 }

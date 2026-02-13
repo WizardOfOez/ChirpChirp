@@ -1,10 +1,14 @@
 ﻿@implements IDisposable
 
+@using Chirp.Data
+@using Microsoft.AspNetCore.Identity
 @inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject UserManager<ApplicationUser> UserManager
 
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
-        <a class="navbar-brand" href="">Xmini</a>
+        <a class="navbar-brand" href="">ChirpIt</a>
     </div>
 </div>
 
@@ -18,6 +22,12 @@
             </NavLink>
         </div>
 
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="peeps">
+                <span class="bi bi-fire" aria-hidden="true"></span> Trending Peeps
+            </NavLink>
+        </div>
+
         <AuthorizeView>
             <Authorized>
                 @{
@@ -28,13 +38,13 @@
                 <div class="nav-item px-3">
                     <a class="nav-link d-flex align-items-center" href="@profileHref">
                         <span class="bi bi-person-circle" style="font-size:1.5rem;" aria-hidden="true"></span>
-                        <span class="ms-2">@context.User.Identity?.Name</span>
+                        <span class="ms-2">@(_displayName ?? context.User.Identity?.Name)</span>
                     </a>
                 </div>
 
                 <div class="nav-item px-3">
                     <NavLink class="nav-link" href="Account/Manage">
-                        <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> @context.User.Identity?.Name
+                        <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> @(_displayName ?? context.User.Identity?.Name)
                     </NavLink>
                 </div>
                 <div class="nav-item px-3">
@@ -65,11 +75,34 @@
 
 @code {
     private string? currentUrl;
+    private string? _displayName;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         currentUrl = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
         NavigationManager.LocationChanged += OnLocationChanged;
+
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            if (user.Identity?.IsAuthenticated == true)
+            {
+                var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (userId != null)
+                {
+                    var appUser = await UserManager.FindByIdAsync(userId);
+                    if (appUser != null)
+                    {
+                        _displayName = string.IsNullOrEmpty(appUser.UserName) ? appUser.Email : appUser.UserName;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // ignore errors, fallback to claim name
+        }
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)

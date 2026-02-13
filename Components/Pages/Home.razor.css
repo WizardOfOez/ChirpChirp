@@ -1,0 +1,142 @@
+.twitter-feed {
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.tweet-card {
+    border: 1px solid #e1e8ed;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    background-color: #fff;
+}
+
+.tweet-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.tweet-author {
+    font-weight: 600;
+    display: flex;
+    flex-direction: column;
+}
+
+.tweet-timestamp {
+    font-size: 0.85rem;
+    color: #657786;
+    font-weight: normal;
+    margin-top: 4px;
+}
+
+.tweet-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.tweet-text {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin: 12px 0;
+    font-size: 1rem;
+    line-height: 1.5;
+}
+
+.tweet-image {
+    margin-top: 12px;
+    max-width: 100%;
+    border-radius: 8px;
+}
+
+.tweet-footer {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.char-counter {
+    font-size: 0.85rem;
+    color: #657786;
+    margin-top: 4px;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    .twitter-feed {
+        max-width: 100%;
+        padding: 0 8px;
+    }
+
+    .tweet-card {
+        padding: 12px;
+        margin-bottom: 8px;
+    }
+
+    .tweet-header {
+        gap: 4px;
+    }
+
+    .tweet-author {
+        font-size: 0.95rem;
+    }
+
+    .tweet-timestamp {
+        font-size: 0.8rem;
+    }
+
+    .tweet-text {
+        font-size: 0.95rem;
+    }
+
+    .btn-sm {
+        padding: 4px 8px;
+        font-size: 0.85rem;
+    }
+
+    .tweet-actions {
+        gap: 4px;
+    }
+}
+
+@media (max-width: 480px) {
+    .twitter-feed {
+        padding: 0 4px;
+    }
+
+    .tweet-card {
+        padding: 10px;
+        border-radius: 4px;
+    }
+
+    .tweet-author {
+        font-size: 0.9rem;
+    }
+
+    .tweet-text {
+        font-size: 0.9rem;
+        margin: 8px 0;
+    }
+
+    .tweet-footer {
+        gap: 4px;
+    }
+
+    .btn-sm {
+        padding: 3px 6px;
+        font-size: 0.75rem;
+    }
+
+    .tweet-actions {
+        flex-direction: column;
+    }
+
+    .tweet-actions button {
+        width: 100%;
+    }
+}

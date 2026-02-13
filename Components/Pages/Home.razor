@@ -2,6 +2,7 @@
 @using Chirp.Data
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.EntityFrameworkCore
+@using Chirp.Tools
 
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IDbContextFactory<ApplicationDbContext> Factory
@@ -13,8 +14,9 @@
 <EditForm Model="_modelTweet" OnValidSubmit="HandleValidSubmitAsync">
     <DataAnnotationsValidator />
     <div class="mb-3">
-        <InputTextArea id="text" class="form-control" rows="3" @bind-Value="_modelTweet.Text" placeholder="Was gibt's Neues?" />
+        <InputTextArea id="text" class="form-control" rows="3" @bind-Value="_modelTweet.Text" placeholder="Chirp los (mit < > für Trends!)" @onchange="OnTextInput" />
         <ValidationMessage For="@(() => _modelTweet.Text)" />
+        <small class="text-muted">@_characterCount / 123</small>
     </div>
     @if (_modelTweet.Image != null)
     {
@@ -51,21 +53,29 @@
                             {
                                 <span>Unbekannt</span>
                             }
-                            (@tweet.CreatedAt.ToLocalTime())
+                            <span class="text-muted fw-normal">(@tweet.CreatedAt.ToLocalTime().ToString("g"))</span>
                         </div>
-                        @if (tweet.ApplicationUserId != _userId)
-                        {
-                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OnFollowUserAsync(tweet)">
-                                @if (dbContext.Followers.Any(f => f.FollowerUserId == _userId && f.FollowsUserId == tweet.ApplicationUserId))
-                                {
-                                    <span>Nicht folgen</span>
-                                }
-                                else
-                                {
-                                    <span>Folgen</span>
-                                }
-                            </button>
-                        }
+                        <div class="d-flex gap-2">
+                            @if (tweet.ApplicationUserId != _userId)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OnFollowUserAsync(tweet)">
+                                    @if (dbContext.Followers.Any(f => f.FollowerUserId == _userId && f.FollowsUserId == tweet.ApplicationUserId))
+                                    {
+                                        <span>Nicht folgen</span>
+                                    }
+                                    else
+                                    {
+                                        <span>Folgen</span>
+                                    }
+                                </button>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => OnDeleteTweetAsync(tweet)" title="Chirp löschen">
+                                    <span class="bi bi-trash"></span>
+                                </button>
+                            }
+                        </div>
                     </div>
                     <div class="mb-2" style="white-space: pre-wrap;">
                         <p class="mb-0">
@@ -78,9 +88,11 @@
                             <img src="/images/@tweet.Id" alt="Bild" class="img-fluid" />
                         </div>
                     }
-                    <div>
-                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OnLikeTweetAsync(tweet)">Like</button>
-                        @((tweet.Likes?.Count) ?? 0)
+                    <div class="mt-2">
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OnLikeTweetAsync(tweet)">
+                            <span class="bi bi-heart"></span> Like
+                        </button>
+                        <span class="ms-2 text-muted">@((tweet.Likes?.Count) ?? 0)</span>
                     </div>
                 </div>
             </li>
@@ -91,6 +103,7 @@
 @code {
     private Tweet _modelTweet = new();
     private string? _userId;
+    private int _characterCount = 0;
     
     #region Tweets
     private List<Tweet>? _modelLastTweets;
@@ -133,10 +146,21 @@
         if (_userId != null)
         {
             _modelTweet.ApplicationUserId = _userId;
+            _modelTweet.CreatedAt = DateTime.UtcNow;
             dbContext.Tweets.Add(_modelTweet);
             await dbContext.SaveChangesAsync();
+
+            var peepNames = PeepExtractor.ExtractPeeps(_modelTweet.Text);
+            foreach (var peepName in peepNames)
+            {
+                var peep = new Peep { Name = peepName, TweetId = _modelTweet.Id };
+                dbContext.Peeps.Add(peep);
+            }
+            await dbContext.SaveChangesAsync();
+
             await LoadTweetsAsync();
             _modelTweet = new Tweet();
+            _characterCount = 0;
         }
     }
     private async Task OnLikeTweetAsync(Tweet tweet)
@@ -181,6 +205,34 @@
         await LoadTweetsAsync();
     }
 
+    private async Task OnDeleteTweetAsync(Tweet tweet)
+    {
+        if (tweet.ApplicationUserId != _userId)
+        {
+            return; // Only allow users to delete their own tweets
+        }
+
+        ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+        var tweetToDelete = await dbContext.Tweets.FindAsync(tweet.Id);
+        
+        if (tweetToDelete != null)
+        {
+            // Delete associated peeps
+            var peepsToDelete = await dbContext.Peeps.Where(p => p.TweetId == tweet.Id).ToListAsync();
+            dbContext.Peeps.RemoveRange(peepsToDelete);
+
+            // Delete associated likes
+            var likesToDelete = await dbContext.Likes.Where(l => l.TweetId == tweet.Id).ToListAsync();
+            dbContext.Likes.RemoveRange(likesToDelete);
+
+            // Delete the tweet
+            dbContext.Tweets.Remove(tweetToDelete);
+            await dbContext.SaveChangesAsync();
+
+            await LoadTweetsAsync();
+        }
+    }
+
     private async Task OnInputFileChangeAsync(InputFileChangeEventArgs e)
     {
         var file = e.File;
@@ -211,4 +263,11 @@
         }
     }
 
+    private void OnTextInput(ChangeEventArgs e)
+    {
+        if (e.Value is string text)
+        {
+            _characterCount = text.Length;
+        }
+    }
 }

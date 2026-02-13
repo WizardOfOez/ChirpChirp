@@ -9,6 +9,7 @@ namespace Chirp.Data
         public DbSet<Like> Likes { get; set; } = default!;
         public DbSet<Tweet> Tweets { get; set; } = default!;
         public DbSet<Followers> Followers { get; set; } = default!;
+        public DbSet<Peep> Peeps { get; set; } = default!;
         #endregion
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -39,6 +40,12 @@ namespace Chirp.Data
                 .HasOne(f => f.FollowsUser)
                 .WithMany(u => u.Following)
                 .HasForeignKey(f => f.FollowsUserId);
+            #endregion
+            #region Peep
+            builder.Entity<Peep>()
+                .HasOne(p => p.Tweet)
+                .WithMany(t => t.Peeps)
+                .HasForeignKey(p => p.TweetId);
             #endregion
         }
     }

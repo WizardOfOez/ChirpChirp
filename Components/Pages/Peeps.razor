@@ -1,0 +1,67 @@
+@page "/peeps"
+@using Chirp.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+
+@inject IDbContextFactory<ApplicationDbContext> Factory
+
+@attribute [Authorize]
+
+<PageTitle>Trending Peeps</PageTitle>
+
+<h1>Trending Peeps (Last 24 Hours)</h1>
+<hr />
+
+@if (_topPeeps != null && _topPeeps.Count > 0)
+{
+    <div class="row">
+        @foreach (var peepItem in _topPeeps)
+        {
+            <div class="col-md-6 col-lg-4 mb-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">&lt;@peepItem.Name&gt;</h5>
+                        <p class="card-text text-muted">@peepItem.Count mentions</p>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+else
+{
+    <p><em>No peeps in the last 24 hours.</em></p>
+}
+
+@code {
+    private List<PeepCountDto>? _topPeeps;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTopPeepsAsync();
+        await base.OnInitializedAsync();
+    }
+
+    private async Task LoadTopPeepsAsync()
+    {
+        ApplicationDbContext dbContext = await Factory.CreateDbContextAsync();
+        var twentyFourHoursAgo = DateTime.UtcNow.AddHours(-24);
+
+        var peeps = await dbContext.Peeps
+            .Where(p => p.CreatedAt >= twentyFourHoursAgo)
+            .ToListAsync();
+
+        _topPeeps = peeps
+            .GroupBy(p => p.Name)
+            .OrderByDescending(g => g.Count())
+            .Take(5)
+            .Select(g => new PeepCountDto { Name = g.Key, Count = g.Count() })
+            .ToList();
+    }
+
+    private class PeepCountDto
+    {
+        public string Name { get; set; } = "";
+        public int Count { get; set; }
+    }
+}
